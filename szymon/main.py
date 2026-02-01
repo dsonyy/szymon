@@ -9,7 +9,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from szymon.routers import calendar as calendar_router
 from szymon.routers import tasks as tasks_router
+from szymon.services.google_auth import GoogleAuthService
+from szymon.services.google_calendar import GoogleCalendarService
 from szymon.services.google_tasks import GoogleTasksService
 
 ROOT_DIR = Path(__file__).parent.parent
@@ -46,12 +49,12 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-def _init_google_tasks() -> Optional[GoogleTasksService]:
-    """Initialize Google Tasks service if configured."""
+def _init_google_auth() -> Optional[GoogleAuthService]:
+    """Initialize shared Google OAuth service if configured."""
     if not settings.google_client_id or not settings.google_client_secret:
         return None
     redirect_uri = f"https://localhost:{settings.port}/api/tasks/auth/callback"
-    return GoogleTasksService(
+    return GoogleAuthService(
         client_id=settings.google_client_id,
         client_secret=settings.google_client_secret,
         token_path=settings.google_token_path,
@@ -59,8 +62,24 @@ def _init_google_tasks() -> Optional[GoogleTasksService]:
     )
 
 
+def _init_google_tasks(auth: Optional[GoogleAuthService]) -> Optional[GoogleTasksService]:
+    """Initialize Google Tasks service if auth is configured."""
+    if auth is None:
+        return None
+    return GoogleTasksService(auth_service=auth)
+
+
+def _init_google_calendar(auth: Optional[GoogleAuthService]) -> Optional[GoogleCalendarService]:
+    """Initialize Google Calendar service if auth is configured."""
+    if auth is None:
+        return None
+    return GoogleCalendarService(auth_service=auth)
+
+
 # Initialize services and routers
-tasks_router.init_service(_init_google_tasks())
+_google_auth = _init_google_auth()
+tasks_router.init_service(_init_google_tasks(_google_auth))
+calendar_router.init_service(_init_google_calendar(_google_auth))
 
 
 def ensure_certs():
@@ -95,6 +114,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(tasks_router.router)
+app.include_router(calendar_router.router)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -109,7 +129,14 @@ def health():
 
 # Serve React app - must be after API routes
 if WEB_DIR.exists():
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    # Mount static assets (JS, CSS, etc.)
+    app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
+
+    # Catch-all route for SPA client-side routing
+    @app.get("/{path:path}", include_in_schema=False)
+    def serve_spa(path: str):
+        # Serve index.html for all non-API routes (React Router handles them)
+        return FileResponse(WEB_DIR / "index.html")
 
 
 def main():
