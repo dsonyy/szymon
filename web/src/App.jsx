@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 
 const designSystem = {
   fonts: {
@@ -127,6 +128,7 @@ const styles = {
   calendarContainer: {
     display: "grid",
     gridTemplateColumns: "repeat(8, 1fr)",
+    gap: "16px",
     minHeight: "calc(100vh - 120px)",
   },
   column: {
@@ -153,22 +155,16 @@ const styles = {
     color: designSystem.colors.text,
     marginTop: designSystem.spacing.xs,
   },
-  backlogHeader: {
-    fontFamily: designSystem.fonts.calendar,
-    padding: designSystem.spacing.md,
-    textAlign: "center",
-    fontSize: "1rem",
-    cursor: "pointer",
-  },
   taskList: {
     flex: 1,
     overflowY: "auto",
-    padding: designSystem.spacing.xs,
+    padding: 0,
+    marginTop: "32px",
   },
   taskItem: {
     fontFamily: designSystem.fonts.tasks,
     fontSize: "0.8125rem",
-    padding: designSystem.spacing.sm,
+    padding: 0,
     display: "flex",
     alignItems: "flex-start",
     gap: designSystem.spacing.xs,
@@ -176,28 +172,28 @@ const styles = {
   taskCheckbox: {
     width: "10px",
     height: "10px",
-    border: "2px solid #000",
+    border: `2px solid ${designSystem.colors.text}`,
     borderRadius: "3px",
-    backgroundColor: "#fff",
+    backgroundColor: designSystem.colors.background,
     cursor: "pointer",
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: "3px",
+    marginTop: "0px",
   },
   taskCheckboxChecked: {
     width: "10px",
     height: "10px",
-    border: "2px solid #000",
+    border: `2px solid ${designSystem.colors.text}`,
     borderRadius: "3px",
-    backgroundColor: "#000",
+    backgroundColor: designSystem.colors.text,
     cursor: "pointer",
     flexShrink: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: "3px",
+    marginTop: "0px",
   },
   taskContent: {
     flex: 1,
@@ -209,11 +205,10 @@ const styles = {
   taskTitleCompleted: {
     opacity: 0.5,
   },
-  taskNotes: {
-    fontSize: "0.75rem",
-    color: designSystem.colors.textMuted,
-    marginTop: "2px",
-    wordBreak: "break-word",
+  commentIcon: {
+    marginLeft: "4px",
+    verticalAlign: "middle",
+    flexShrink: 0,
   },
   taskDelete: {
     padding: "2px 4px",
@@ -255,6 +250,23 @@ const styles = {
     color: "#007bff",
     textDecoration: "underline",
   },
+  viewTabs: {
+    display: "flex",
+    gap: designSystem.spacing.xs,
+    padding: designSystem.spacing.md,
+    borderBottom: `1px solid ${designSystem.colors.border}`,
+  },
+  viewTab: {
+    padding: `${designSystem.spacing.sm} ${designSystem.spacing.md}`,
+    textDecoration: "none",
+    color: designSystem.colors.textMuted,
+    borderRadius: "4px",
+  },
+  viewTabActive: {
+    backgroundColor: designSystem.colors.backgroundToday,
+    color: designSystem.colors.text,
+    fontWeight: "500",
+  },
   // Mobile styles
   mobileContainer: {
     display: "flex",
@@ -264,6 +276,7 @@ const styles = {
 };
 
 export default function App() {
+  const location = useLocation();
   // Existing state
   const [health, setHealth] = useState(null);
   const [authStatus, setAuthStatus] = useState(null);
@@ -276,6 +289,7 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [addingToDate, setAddingToDate] = useState(null); // Date or 'backlog'
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [togglingTasks, setTogglingTasks] = useState(new Set());
 
   useEffect(() => {
     fetch("/health")
@@ -374,6 +388,9 @@ export default function App() {
   };
 
   const toggleComplete = async (task) => {
+    if (togglingTasks.has(task.id)) return;
+
+    setTogglingTasks(prev => new Set(prev).add(task.id));
     try {
       const endpoint =
         task.status === "completed"
@@ -384,6 +401,12 @@ export default function App() {
       await loadTasks();
     } catch (e) {
       setError(e.message);
+    } finally {
+      setTogglingTasks(prev => {
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
     }
   };
 
@@ -420,6 +443,28 @@ export default function App() {
         </div>
       ) : (
         <>
+          {/* View Navigation Tabs */}
+          <div style={styles.viewTabs}>
+            <a
+              href="/"
+              style={{
+                ...styles.viewTab,
+                ...(location.pathname === "/" ? styles.viewTabActive : {}),
+              }}
+            >
+              Tasks
+            </a>
+            <a
+              href="/calendar"
+              style={{
+                ...styles.viewTab,
+                ...(location.pathname === "/calendar" ? styles.viewTabActive : {}),
+              }}
+            >
+              Calendar
+            </a>
+          </div>
+
           {/* Week Navigation */}
           <div style={styles.navigation}>
             <button style={styles.navButton} onClick={() => setWeekOffset(w => w - 1)}>
@@ -480,22 +525,18 @@ export default function App() {
                           )}
                         </div>
                         <div style={styles.taskContent}>
-                          <div style={{
+                          <span style={{
                             ...styles.taskTitle,
                             ...(task.status === "completed" ? styles.taskTitleCompleted : {}),
                           }}>
                             {task.title}
-                          </div>
+                          </span>
                           {task.notes && (
-                            <div style={styles.taskNotes}>{task.notes}</div>
+                            <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#000" strokeWidth="2">
+                              <path d="M1 2h14v10H4l-3 3V2z"/>
+                            </svg>
                           )}
                         </div>
-                        <button
-                          style={styles.taskDelete}
-                          onClick={() => deleteTask(task.id)}
-                        >
-                          ×
-                        </button>
                       </div>
                     ))}
                   </div>
@@ -524,10 +565,11 @@ export default function App() {
               ...(isMobile ? styles.mobileColumn : {}),
             }}>
               <div
-                style={styles.backlogHeader}
+                style={styles.dayHeader}
                 onClick={() => setAddingToDate('backlog')}
               >
-                Backlog
+                <div style={styles.dayNumber}>&nbsp;</div>
+                <div style={styles.dayName}>Backlog</div>
               </div>
 
               <div style={styles.taskList}>
@@ -544,22 +586,18 @@ export default function App() {
                       )}
                     </div>
                     <div style={styles.taskContent}>
-                      <div style={{
+                      <span style={{
                         ...styles.taskTitle,
                         ...(task.status === "completed" ? styles.taskTitleCompleted : {}),
                       }}>
                         {task.title}
-                      </div>
+                      </span>
                       {task.notes && (
-                        <div style={styles.taskNotes}>{task.notes}</div>
+                        <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#000" strokeWidth="2">
+                          <path d="M1 2h14v10H4l-3 3V2z"/>
+                        </svg>
                       )}
                     </div>
-                    <button
-                      style={styles.taskDelete}
-                      onClick={() => deleteTask(task.id)}
-                    >
-                      ×
-                    </button>
                   </div>
                 ))}
               </div>
