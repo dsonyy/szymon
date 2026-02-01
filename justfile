@@ -1,25 +1,14 @@
 set shell := ["bash", "-uc"]
 
-# Install all dependencies
-install:
-    pip install -e .
-    cd web && npm install
+# Run backend and frontend with hot reload
+dev:
+    uvicorn szymon.main:app --reload & cd web && npm run dev
 
-# Build the React app
+# Build the project
 build:
-    cd web && npm run build
+    pip install -e .
+    cd web && npm install && npm run build
 
-# Run the server
-run:
+# Run the built project
+start:
     szymon
-
-# Install, build, and run
-all: install build run
-
-# Run React dev server (hot reload)
-dev-web:
-    cd web && npm run dev
-
-# Clean build artifacts
-clean:
-    rm -rf web/dist web/node_modules certs __pycache__ *.egg-info
