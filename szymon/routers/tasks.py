@@ -70,11 +70,11 @@ def list_task_lists():
 
 
 @router.get("")
-def list_tasks(task_list_id: str = "@default", show_completed: bool = True):
+def list_tasks(task_list_id: str = "@default", show_completed: bool = True, show_hidden: bool = True):
     """List all tasks in a task list."""
     service = _require_service()
     try:
-        return service.list_tasks(task_list_id=task_list_id, show_completed=show_completed)
+        return service.list_tasks(task_list_id=task_list_id, show_completed=show_completed, show_hidden=show_hidden)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

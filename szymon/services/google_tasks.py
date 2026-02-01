@@ -1,16 +1,11 @@
 """Google Tasks API service with CRUD operations."""
 
-from pathlib import Path
 from typing import Optional
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
-SCOPES = ["https://www.googleapis.com/auth/tasks"]
+from szymon.services.google_auth import GoogleAuthService
 
 
 class TaskCreate(BaseModel):
@@ -29,89 +24,28 @@ class TaskUpdate(BaseModel):
 class GoogleTasksService:
     """Service for interacting with Google Tasks API."""
 
-    def __init__(self, client_id: str, client_secret: str, token_path: Path, redirect_uri: str):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.token_path = token_path
-        self.redirect_uri = redirect_uri
+    def __init__(self, auth_service: GoogleAuthService):
+        self.auth = auth_service
         self._service = None
-
-    def _get_client_config(self) -> dict:
-        """Get OAuth client configuration."""
-        return {
-            "web": {
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [self.redirect_uri],
-            }
-        }
-
-    def _get_flow(self) -> Flow:
-        """Create OAuth flow."""
-        return Flow.from_client_config(
-            self._get_client_config(),
-            scopes=SCOPES,
-            redirect_uri=self.redirect_uri,
-        )
-
-    def _get_credentials(self) -> Credentials:
-        """Get or refresh OAuth2 credentials."""
-        creds = None
-
-        if self.token_path.exists():
-            creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                self._save_credentials(creds)
-            else:
-                raise Exception("Not authenticated. Visit /api/tasks/auth/login to authenticate.")
-
-        return creds
-
-    def _save_credentials(self, creds: Credentials):
-        """Save credentials to token file."""
-        self.token_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.token_path, "w") as token:
-            token.write(creds.to_json())
-
-    def exchange_code(self, code: str) -> Credentials:
-        """Exchange authorization code for credentials."""
-        flow = self._get_flow()
-        flow.fetch_token(code=code)
-        creds = flow.credentials
-        self._save_credentials(creds)
-        return creds
 
     def _get_service(self):
         """Get or create the Tasks API service."""
         if self._service is None:
-            creds = self._get_credentials()
+            creds = self.auth.get_credentials()
             self._service = build("tasks", "v1", credentials=creds)
         return self._service
 
     def is_authenticated(self) -> bool:
         """Check if valid credentials exist."""
-        if not self.token_path.exists():
-            return False
-        try:
-            creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
-            return creds.valid or (creds.expired and creds.refresh_token)
-        except Exception:
-            return False
+        return self.auth.is_authenticated()
 
     def get_auth_url(self) -> tuple[str, str]:
-        """Get the OAuth authorization URL. Returns (url, state)."""
-        flow = self._get_flow()
-        auth_url, state = flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent",
-        )
-        return auth_url, state
+        """Get the OAuth authorization URL."""
+        return self.auth.get_auth_url()
+
+    def exchange_code(self, code: str):
+        """Exchange authorization code for credentials."""
+        return self.auth.exchange_code(code)
 
     # Task Lists
 
@@ -132,7 +66,7 @@ class GoogleTasksService:
         task_list_id: str = "@default",
         max_results: int = 100,
         show_completed: bool = True,
-        show_hidden: bool = False,
+        show_hidden: bool = True,
     ) -> list[dict]:
         """List all tasks in a task list."""
         service = self._get_service()
