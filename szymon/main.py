@@ -139,16 +139,8 @@ def tasks_auth_callback(code: str, state: Optional[str] = None):
     service = _require_google_tasks()
     try:
         service.exchange_code(code)
-        return HTMLResponse(
-            content="""
-            <html><body>
-            <h1>Authentication successful!</h1>
-            <p>You can close this window and return to the app.</p>
-            <script>window.close();</script>
-            </body></html>
-            """,
-            status_code=200,
-        )
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/")
     except Exception as e:
         return HTMLResponse(
             content=f"<html><body><h1>Authentication failed</h1><p>{e}</p></body></html>",
