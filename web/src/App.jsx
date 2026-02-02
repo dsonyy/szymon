@@ -94,10 +94,10 @@ const groupEventsByDate = (events, weekDays) => {
 };
 
 // Group tasks by date
-const groupTasksByDate = (tasks, weekDays) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+const groupTasksByDate = (tasks, weekDays, isCurrentWeek) => {
   const weekStart = weekDays[0];
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 7);
 
   const groups = {
     backlog: [],
@@ -106,7 +106,10 @@ const groupTasksByDate = (tasks, weekDays) => {
 
   tasks.forEach(task => {
     if (!task.due) {
-      groups.backlog.push(task);
+      // Tasks without due date: only show in current week backlog if uncompleted
+      if (isCurrentWeek && task.status !== "completed") {
+        groups.backlog.push(task);
+      }
     } else {
       const dueDate = new Date(task.due);
       dueDate.setHours(0, 0, 0, 0);
@@ -114,9 +117,20 @@ const groupTasksByDate = (tasks, weekDays) => {
 
       if (groups[dateKey] !== undefined) {
         groups[dateKey].push(task);
-      } else {
-        // Task outside current week goes to backlog
-        groups.backlog.push(task);
+      }
+      // Tasks outside current week no longer go to backlog
+    }
+
+    // For current week: also show tasks completed this week in backlog
+    if (isCurrentWeek && task.status === "completed" && task.completed) {
+      const completedDate = new Date(task.completed);
+      if (completedDate >= weekStart && completedDate < weekEnd) {
+        // Only add to backlog if not already in a day column
+        if (!task.due || !groups[new Date(task.due).toDateString()]) {
+          if (!groups.backlog.includes(task)) {
+            groups.backlog.push(task);
+          }
+        }
       }
     }
   });
@@ -179,7 +193,7 @@ const styles = {
     cursor: "pointer",
   },
   dayNumber: {
-    fontSize: "64px",
+    fontSize: "128px",
     fontWeight: "bold",
     lineHeight: 1,
   },
@@ -237,7 +251,7 @@ const styles = {
     wordBreak: "break-word",
   },
   taskTitleCompleted: {
-    opacity: 0.5,
+    // Keep full opacity - all text stays black
   },
   commentIcon: {
     marginLeft: "4px",
@@ -277,7 +291,6 @@ const styles = {
     display: "flex",
     alignItems: "flex-start",
     gap: designSystem.spacing.xs,
-    opacity: 0.7,
   },
   eventBullet: {
     width: "10px",
@@ -403,8 +416,8 @@ export default function App() {
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
 
   const groupedTasks = useMemo(
-    () => groupTasksByDate(tasks, weekDays),
-    [tasks, weekDays]
+    () => groupTasksByDate(tasks, weekDays, weekOffset === 0),
+    [tasks, weekDays, weekOffset]
   );
 
   const groupedEvents = useMemo(
@@ -577,13 +590,18 @@ export default function App() {
           </div>
 
           {/* Calendar Grid */}
-          <div style={isMobile ? styles.mobileContainer : styles.calendarContainer}>
+          <div style={isMobile ? styles.mobileContainer : {
+            ...styles.calendarContainer,
+            gridTemplateColumns: weekOffset === 0 ? "repeat(8, 1fr)" : "repeat(7, 1fr)",
+          }}>
             {/* Day Columns */}
             {weekDays.map((day) => {
               const dateKey = day.toDateString();
               const isToday = isSameDay(day, today);
+              const isPast = day < today;
               const dayTasks = groupedTasks[dateKey] || [];
               const dayEvents = groupedEvents[dateKey] || [];
+              const pastColor = isPast ? "#777" : undefined;
 
               return (
                 <div
@@ -598,8 +616,8 @@ export default function App() {
                     style={styles.dayHeader}
                     onClick={() => setAddingToDate(day)}
                   >
-                    <div style={styles.dayNumber}>{day.getDate()}</div>
-                    <div style={styles.dayName}>
+                    <div style={{...styles.dayNumber, ...(isPast && {color: pastColor})}}>{day.getDate()}</div>
+                    <div style={{...styles.dayName, ...(isPast && {color: pastColor})}}>
                       {day.toLocaleDateString('en-US', { weekday: 'long' })}
                     </div>
                   </div>
@@ -608,7 +626,10 @@ export default function App() {
                     {dayTasks.map((task) => (
                       <div key={task.id} style={styles.taskItem}>
                         <div
-                          style={task.status === "completed" ? styles.taskCheckboxChecked : styles.taskCheckbox}
+                          style={{
+                            ...(task.status === "completed" ? styles.taskCheckboxChecked : styles.taskCheckbox),
+                            ...(isPast && {borderColor: pastColor, backgroundColor: task.status === "completed" ? pastColor : undefined}),
+                          }}
                           onClick={() => toggleComplete(task)}
                         >
                           {task.status === "completed" && (
@@ -621,11 +642,12 @@ export default function App() {
                           <span style={{
                             ...styles.taskTitle,
                             ...(task.status === "completed" ? styles.taskTitleCompleted : {}),
+                            ...(isPast && {color: pastColor}),
                           }}>
                             {task.title}
                           </span>
                           {task.notes && (
-                            <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#000" strokeWidth="2">
+                            <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke={isPast ? pastColor : "#000"} strokeWidth="2">
                               <path d="M1 2h14v10H4l-3 3V2z"/>
                             </svg>
                           )}
@@ -638,14 +660,14 @@ export default function App() {
                       <div style={styles.eventList}>
                         {dayEvents.map((event) => (
                           <div key={event.id} style={styles.eventItem}>
-                            <div style={styles.eventBullet} />
+                            <div style={{...styles.eventBullet, ...(isPast && {backgroundColor: pastColor})}} />
                             <div style={styles.eventContent}>
                               {event.start?.dateTime && (
-                                <span style={styles.eventTime}>
+                                <span style={{...styles.eventTime, ...(isPast && {color: pastColor})}}>
                                   {formatTime(event.start.dateTime)}{" "}
                                 </span>
                               )}
-                              <span style={styles.eventTitle}>{event.summary}</span>
+                              <span style={{...styles.eventTitle, ...(isPast && {color: pastColor})}}>{event.summary}</span>
                             </div>
                           </div>
                         ))}
@@ -670,64 +692,66 @@ export default function App() {
               );
             })}
 
-            {/* Backlog Column */}
-            <div style={{
-              ...styles.column,
-              ...styles.columnBacklog,
-              ...(isMobile ? styles.mobileColumn : {}),
-            }}>
-              <div
-                style={styles.dayHeader}
-                onClick={() => setAddingToDate('backlog')}
-              >
-                <div style={styles.dayNumber}>&nbsp;</div>
-                <div style={styles.dayName}>Backlog</div>
-              </div>
+            {/* Backlog Column - only show for current week */}
+            {weekOffset === 0 && (
+              <div style={{
+                ...styles.column,
+                ...styles.columnBacklog,
+                ...(isMobile ? styles.mobileColumn : {}),
+              }}>
+                <div
+                  style={styles.dayHeader}
+                  onClick={() => setAddingToDate('backlog')}
+                >
+                  <div style={styles.dayNumber}>&nbsp;</div>
+                  <div style={styles.dayName}>Backlog</div>
+                </div>
 
-              <div style={styles.taskList}>
-                {groupedTasks.backlog.map((task) => (
-                  <div key={task.id} style={styles.taskItem}>
-                    <div
-                      style={task.status === "completed" ? styles.taskCheckboxChecked : styles.taskCheckbox}
-                      onClick={() => toggleComplete(task)}
-                    >
-                      {task.status === "completed" && (
-                        <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="#fff" strokeWidth="2">
-                          <path d="M1 5 L4 8 L9 2" />
-                        </svg>
-                      )}
+                <div style={styles.taskList}>
+                  {groupedTasks.backlog.map((task) => (
+                    <div key={task.id} style={styles.taskItem}>
+                      <div
+                        style={task.status === "completed" ? styles.taskCheckboxChecked : styles.taskCheckbox}
+                        onClick={() => toggleComplete(task)}
+                      >
+                        {task.status === "completed" && (
+                          <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="#fff" strokeWidth="2">
+                            <path d="M1 5 L4 8 L9 2" />
+                          </svg>
+                        )}
+                      </div>
+                      <div style={styles.taskContent}>
+                        <span style={{
+                          ...styles.taskTitle,
+                          ...(task.status === "completed" ? styles.taskTitleCompleted : {}),
+                        }}>
+                          {task.title}
+                        </span>
+                        {task.notes && (
+                          <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#000" strokeWidth="2">
+                            <path d="M1 2h14v10H4l-3 3V2z"/>
+                          </svg>
+                        )}
+                      </div>
                     </div>
-                    <div style={styles.taskContent}>
-                      <span style={{
-                        ...styles.taskTitle,
-                        ...(task.status === "completed" ? styles.taskTitleCompleted : {}),
-                      }}>
-                        {task.title}
-                      </span>
-                      {task.notes && (
-                        <svg style={styles.commentIcon} width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#000" strokeWidth="2">
-                          <path d="M1 2h14v10H4l-3 3V2z"/>
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
 
-              {addingToDate === 'backlog' && (
-                <form style={styles.addTaskForm} onSubmit={createTask}>
-                  <input
-                    style={styles.addTaskInput}
-                    type="text"
-                    placeholder="New task..."
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    autoFocus
-                    onBlur={() => !newTaskTitle && setAddingToDate(null)}
-                  />
-                </form>
-              )}
-            </div>
+                {addingToDate === 'backlog' && (
+                  <form style={styles.addTaskForm} onSubmit={createTask}>
+                    <input
+                      style={styles.addTaskInput}
+                      type="text"
+                      placeholder="New task..."
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      autoFocus
+                      onBlur={() => !newTaskTitle && setAddingToDate(null)}
+                    />
+                  </form>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}
