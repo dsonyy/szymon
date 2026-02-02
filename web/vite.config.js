@@ -6,4 +6,16 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: "https://localhost:2137",
+        secure: false,
+      },
+      "/health": {
+        target: "https://localhost:2137",
+        secure: false,
+      },
+    },
+  },
 });

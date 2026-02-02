@@ -11,12 +11,14 @@ router = APIRouter(prefix="/api/calendar", tags=["calendar"])
 
 # Service instance (initialized from main.py)
 _service: Optional[GoogleCalendarService] = None
+_frontend_url: str = "http://localhost:5173"
 
 
-def init_service(service: Optional[GoogleCalendarService]) -> None:
+def init_service(service: Optional[GoogleCalendarService], frontend_url: str = "http://localhost:5173") -> None:
     """Initialize the Google Calendar service. Called from main.py."""
-    global _service
+    global _service, _frontend_url
     _service = service
+    _frontend_url = frontend_url
 
 
 def _require_service() -> GoogleCalendarService:
@@ -51,7 +53,7 @@ def auth_callback(code: str, state: Optional[str] = None):
     service = _require_service()
     try:
         service.exchange_code(code)
-        return RedirectResponse(url="/calendar")
+        return RedirectResponse(url=f"{_frontend_url}/calendar")
     except Exception as e:
         return HTMLResponse(
             content=f"<html><body><h1>Authentication failed</h1><p>{e}</p></body></html>",

@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import { useLocation } from "react-router-dom";
 
 const designSystem = {
   fonts: {
@@ -57,6 +56,41 @@ const isInWeek = (date, weekStart) => {
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 7);
   return date >= weekStart && date < weekEnd;
+};
+
+// Format time from ISO string
+const formatTime = (dateTimeStr) => {
+  const date = new Date(dateTimeStr);
+  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+};
+
+// Group calendar events by date
+const groupEventsByDate = (events, weekDays) => {
+  const groups = Object.fromEntries(weekDays.map(d => [d.toDateString(), []]));
+
+  events.forEach(event => {
+    const startStr = event.start?.dateTime || event.start?.date;
+    if (!startStr) return;
+
+    const startDate = new Date(startStr);
+    startDate.setHours(0, 0, 0, 0);
+    const dateKey = startDate.toDateString();
+
+    if (groups[dateKey] !== undefined) {
+      groups[dateKey].push(event);
+    }
+  });
+
+  // Sort events by start time within each day
+  Object.keys(groups).forEach(key => {
+    groups[key].sort((a, b) => {
+      const aTime = new Date(a.start?.dateTime || a.start?.date);
+      const bTime = new Date(b.start?.dateTime || b.start?.date);
+      return aTime - bTime;
+    });
+  });
+
+  return groups;
 };
 
 // Group tasks by date
@@ -232,6 +266,38 @@ const styles = {
     boxSizing: "border-box",
     outline: "none",
   },
+  eventList: {
+    marginTop: "16px",
+    padding: 0,
+  },
+  eventItem: {
+    fontFamily: designSystem.fonts.tasks,
+    fontSize: "0.8125rem",
+    padding: 0,
+    display: "flex",
+    alignItems: "flex-start",
+    gap: designSystem.spacing.xs,
+    opacity: 0.7,
+  },
+  eventBullet: {
+    width: "10px",
+    height: "10px",
+    borderRadius: "50%",
+    backgroundColor: designSystem.colors.text,
+    flexShrink: 0,
+    marginTop: "2px",
+  },
+  eventContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  eventTime: {
+    fontSize: "0.75rem",
+    color: designSystem.colors.textMuted,
+  },
+  eventTitle: {
+    wordBreak: "break-word",
+  },
   error: {
     padding: designSystem.spacing.md,
     backgroundColor: "#fee",
@@ -276,13 +342,16 @@ const styles = {
 };
 
 export default function App() {
-  const location = useLocation();
   // Existing state
   const [health, setHealth] = useState(null);
   const [authStatus, setAuthStatus] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Calendar state
+  const [calendarAuthStatus, setCalendarAuthStatus] = useState(null);
+  const [events, setEvents] = useState([]);
 
   // New state
   const [weekOffset, setWeekOffset] = useState(0);
@@ -314,6 +383,13 @@ export default function App() {
     return () => clearInterval(interval);
   }, [authStatus?.authenticated]);
 
+  // Reload events when week changes
+  useEffect(() => {
+    if (calendarAuthStatus?.authenticated) {
+      loadEvents();
+    }
+  }, [weekOffset, calendarAuthStatus?.authenticated]);
+
   // Calculate current week
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -331,6 +407,17 @@ export default function App() {
     [tasks, weekDays]
   );
 
+  const groupedEvents = useMemo(
+    () => groupEventsByDate(events, weekDays),
+    [events, weekDays]
+  );
+
+  const weekEnd = useMemo(() => {
+    const end = new Date(weekStart);
+    end.setDate(end.getDate() + 7);
+    return end;
+  }, [weekStart]);
+
   const checkAuthAndLoadTasks = async () => {
     try {
       const authRes = await fetch("/api/tasks/auth/status");
@@ -339,6 +426,15 @@ export default function App() {
 
       if (auth.configured && auth.authenticated) {
         await loadTasks();
+      }
+
+      // Also check calendar auth
+      const calAuthRes = await fetch("/api/calendar/auth/status");
+      const calAuth = await calAuthRes.json();
+      setCalendarAuthStatus(calAuth);
+
+      if (calAuth.configured && calAuth.authenticated) {
+        await loadEvents();
       }
     } catch (e) {
       setError(e.message);
@@ -359,6 +455,24 @@ export default function App() {
       setError(null);
     } catch (e) {
       setError(e.message);
+    }
+  };
+
+  const loadEvents = async () => {
+    try {
+      const timeMin = weekStart.toISOString();
+      const timeMax = weekEnd.toISOString();
+      const res = await fetch(
+        `/api/calendar/events?calendar_id=primary&time_min=${timeMin}&time_max=${timeMax}`
+      );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Failed to load events");
+      }
+      const data = await res.json();
+      setEvents(data);
+    } catch (e) {
+      console.error("Failed to load calendar events:", e);
     }
   };
 
@@ -443,28 +557,6 @@ export default function App() {
         </div>
       ) : (
         <>
-          {/* View Navigation Tabs */}
-          <div style={styles.viewTabs}>
-            <a
-              href="/"
-              style={{
-                ...styles.viewTab,
-                ...(location.pathname === "/" ? styles.viewTabActive : {}),
-              }}
-            >
-              Tasks
-            </a>
-            <a
-              href="/calendar"
-              style={{
-                ...styles.viewTab,
-                ...(location.pathname === "/calendar" ? styles.viewTabActive : {}),
-              }}
-            >
-              Calendar
-            </a>
-          </div>
-
           {/* Week Navigation */}
           <div style={styles.navigation}>
             <button style={styles.navButton} onClick={() => setWeekOffset(w => w - 1)}>
@@ -491,6 +583,7 @@ export default function App() {
               const dateKey = day.toDateString();
               const isToday = isSameDay(day, today);
               const dayTasks = groupedTasks[dateKey] || [];
+              const dayEvents = groupedEvents[dateKey] || [];
 
               return (
                 <div
@@ -539,6 +632,25 @@ export default function App() {
                         </div>
                       </div>
                     ))}
+
+                    {/* Calendar Events - 16px below tasks */}
+                    {dayEvents.length > 0 && (
+                      <div style={styles.eventList}>
+                        {dayEvents.map((event) => (
+                          <div key={event.id} style={styles.eventItem}>
+                            <div style={styles.eventBullet} />
+                            <div style={styles.eventContent}>
+                              {event.start?.dateTime && (
+                                <span style={styles.eventTime}>
+                                  {formatTime(event.start.dateTime)}{" "}
+                                </span>
+                              )}
+                              <span style={styles.eventTitle}>{event.summary}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {addingToDate && isSameDay(addingToDate, day) && (

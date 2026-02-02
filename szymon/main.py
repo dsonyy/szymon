@@ -1,13 +1,15 @@
+import logging
 import socket
 import subprocess
 from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 from szymon.routers import calendar as calendar_router
 from szymon.routers import tasks as tasks_router
@@ -18,7 +20,6 @@ from szymon.services.google_tasks import GoogleTasksService
 ROOT_DIR = Path(__file__).parent.parent
 ASSETS_DIR = ROOT_DIR / "assets"
 CERTS_DIR = ROOT_DIR / "certs"
-WEB_DIR = ROOT_DIR / "web" / "dist"
 
 
 class Settings(BaseSettings):
@@ -28,6 +29,7 @@ class Settings(BaseSettings):
     debug: bool = True
     host: str = "0.0.0.0"
     port: int = 2137
+    frontend_url: str = "http://localhost:5173"
 
     # Google Tasks API
     google_client_id: Optional[str] = None
@@ -78,8 +80,8 @@ def _init_google_calendar(auth: Optional[GoogleAuthService]) -> Optional[GoogleC
 
 # Initialize services and routers
 _google_auth = _init_google_auth()
-tasks_router.init_service(_init_google_tasks(_google_auth))
-calendar_router.init_service(_init_google_calendar(_google_auth))
+tasks_router.init_service(_init_google_tasks(_google_auth), settings.frontend_url)
+calendar_router.init_service(_init_google_calendar(_google_auth), settings.frontend_url)
 
 
 def ensure_certs():
@@ -112,6 +114,17 @@ app = FastAPI(
     description="Personal assistant - gateway for personal APIs and tools",
 )
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions to prevent app crashes."""
+    logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
+
+
 # Include routers
 app.include_router(tasks_router.router)
 app.include_router(calendar_router.router)
@@ -125,18 +138,6 @@ def favicon():
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# Serve React app - must be after API routes
-if WEB_DIR.exists():
-    # Mount static assets (JS, CSS, etc.)
-    app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
-
-    # Catch-all route for SPA client-side routing
-    @app.get("/{path:path}", include_in_schema=False)
-    def serve_spa(path: str):
-        # Serve index.html for all non-API routes (React Router handles them)
-        return FileResponse(WEB_DIR / "index.html")
 
 
 def main():
